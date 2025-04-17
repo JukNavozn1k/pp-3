@@ -10,14 +10,12 @@ using Matrix = vector<vector<int>>;
 
 const int STRASSEN_THRESHOLD = 64;
 int MAX_THREADS = 1;
-int PARALLEL_DEPTH = 2;
 sem_t thread_sem;
 
 struct ThreadData {
     Matrix A;
     Matrix B;
     Matrix result;
-    int depth;
 };
 
 Matrix generateRandomMatrix(int n) {
@@ -99,16 +97,16 @@ Matrix strassenSequential(const Matrix& A, const Matrix& B) {
     return C;
 }
 
-Matrix strassenPOSIX(const Matrix& A, const Matrix& B, int depth);
+Matrix strassenPOSIX(const Matrix& A, const Matrix& B);
 
 void* computeMParallel(void* arg) {
     ThreadData* data = static_cast<ThreadData*>(arg);
-    data->result = strassenPOSIX(data->A, data->B, data->depth);
+    data->result = strassenPOSIX(data->A, data->B);
     sem_post(&thread_sem);
     return nullptr;
 }
 
-Matrix strassenPOSIX(const Matrix& A, const Matrix& B, int depth) {
+Matrix strassenPOSIX(const Matrix& A, const Matrix& B) {
     int n = A.size();
     if (n <= STRASSEN_THRESHOLD)
         return standardMultiply(A, B);
@@ -144,12 +142,11 @@ Matrix strassenPOSIX(const Matrix& A, const Matrix& B, int depth) {
     M_data[6].A = subtract(A12, A22); M_data[6].B = add(B21, B22);
 
     for (int i = 0; i < 7; ++i) {
-        M_data[i].depth = depth + 1;
-        if (depth < PARALLEL_DEPTH && sem_trywait(&thread_sem) == 0) {
+        if (sem_trywait(&thread_sem) == 0) {
             pthread_create(&threads[i], nullptr, computeMParallel, &M_data[i]);
             thread_created[i] = true;
         } else {
-            M_data[i].result = strassenPOSIX(M_data[i].A, M_data[i].B, depth + 1);
+            M_data[i].result = strassenPOSIX(M_data[i].A, M_data[i].B);
         }
     }
 
@@ -162,12 +159,12 @@ Matrix strassenPOSIX(const Matrix& A, const Matrix& B, int depth) {
     Matrix C(n, vector<int>(n));
     for (int i = 0; i < newSize; ++i)
         for (int j = 0; j < newSize; ++j) {
-            C[i][j] = M_data[0].result[i][j] + M_data[3].result[i][j]
-                    - M_data[4].result[i][j] + M_data[6].result[i][j];
+            C[i][j] = M_data[0].result[i][j] + M_data[3].result[i][j] - 
+                      M_data[4].result[i][j] + M_data[6].result[i][j];
             C[i][j + newSize] = M_data[2].result[i][j] + M_data[4].result[i][j];
             C[i + newSize][j] = M_data[1].result[i][j] + M_data[3].result[i][j];
-            C[i + newSize][j + newSize] = M_data[0].result[i][j] - M_data[1].result[i][j]
-                                        + M_data[2].result[i][j] + M_data[5].result[i][j];
+            C[i + newSize][j + newSize] = M_data[0].result[i][j] - M_data[1].result[i][j] + 
+                                          M_data[2].result[i][j] + M_data[5].result[i][j];
         }
 
     return C;
@@ -186,13 +183,11 @@ int main(int argc, char* argv[]) {
     int n = 1024;
     if (argc >= 2) n = atoi(argv[1]);
     if (argc >= 3) MAX_THREADS = atoi(argv[2]);
-    if (argc >= 4) PARALLEL_DEPTH = atoi(argv[3]);
 
     sem_init(&thread_sem, 0, MAX_THREADS);
 
     cout << "Matrix size: " << n << "x" << n << endl;
     cout << "Max threads: " << MAX_THREADS << endl;
-    cout << "Parallel recursion depth: " << PARALLEL_DEPTH << endl;
 
     Matrix A = generateRandomMatrix(n);
     Matrix B = generateRandomMatrix(n);
@@ -208,7 +203,7 @@ int main(int argc, char* argv[]) {
     cout << "Strassen Sequential: " << chrono::duration<double, milli>(end - start).count() << " ms\n";
 
     start = chrono::high_resolution_clock::now();
-    Matrix C_par = strassenPOSIX(A, B, 0);
+    Matrix C_par = strassenPOSIX(A, B);
     end = chrono::high_resolution_clock::now();
     cout << "Strassen POSIX: " << chrono::duration<double, milli>(end - start).count() << " ms\n";
 
