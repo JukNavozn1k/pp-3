@@ -2,12 +2,19 @@
 #include <vector>
 #include <cstdlib>
 #include <chrono>
-#include <pthread.h>  // Для POSIX потоков
+#include <pthread.h>
 
 using namespace std;
 using Matrix = vector<vector<int>>;
 
 const int STRASSEN_THRESHOLD = 64;
+
+// Максимальное число потоков, задаётся из main()
+int maxThreads = 4;
+
+// Прототипы
+Matrix strassenSequential(const Matrix& A, const Matrix& B);
+Matrix strassenParallel(const Matrix& A, const Matrix& B);
 
 Matrix generateRandomMatrix(int n) {
     Matrix A(n, vector<int>(n));
@@ -20,19 +27,16 @@ Matrix generateRandomMatrix(int n) {
 Matrix standardMultiply(const Matrix& A, const Matrix& B) {
     int n = A.size();
     Matrix C(n, vector<int>(n, 0));
-    for (int i = 0; i < n; i++) {
-        for (int k = 0; k < n; k++) {
-            for (int j = 0; j < n; j++) {
+    for (int i = 0; i < n; i++)
+        for (int k = 0; k < n; k++)
+            for (int j = 0; j < n; j++)
                 C[i][j] += A[i][k] * B[k][j];
-            }
-        }
-    }
     return C;
 }
 
 Matrix add(const Matrix& A, const Matrix& B) {
     int n = A.size();
-    Matrix C(n, vector<int>(n, 0));
+    Matrix C(n, vector<int>(n));
     for (int i = 0; i < n; i++)
         for (int j = 0; j < n; j++)
             C[i][j] = A[i][j] + B[i][j];
@@ -41,35 +45,39 @@ Matrix add(const Matrix& A, const Matrix& B) {
 
 Matrix subtract(const Matrix& A, const Matrix& B) {
     int n = A.size();
-    Matrix C(n, vector<int>(n, 0));
+    Matrix C(n, vector<int>(n));
     for (int i = 0; i < n; i++)
         for (int j = 0; j < n; j++)
             C[i][j] = A[i][j] - B[i][j];
     return C;
 }
 
+// Последовательный Strassen
 Matrix strassenSequential(const Matrix& A, const Matrix& B) {
     int n = A.size();
-    if (n <= STRASSEN_THRESHOLD) return standardMultiply(A, B);
+    if (n <= STRASSEN_THRESHOLD)
+        return standardMultiply(A, B);
 
-    int newSize = n / 2;
-    Matrix A11(newSize, vector<int>(newSize)), A12(newSize, vector<int>(newSize)),
-        A21(newSize, vector<int>(newSize)), A22(newSize, vector<int>(newSize));
-    Matrix B11(newSize, vector<int>(newSize)), B12(newSize, vector<int>(newSize)),
-        B21(newSize, vector<int>(newSize)), B22(newSize, vector<int>(newSize));
+    int m = n / 2;
+    // Блоки A и B
+    Matrix A11(m, vector<int>(m)), A12(m, vector<int>(m)),
+           A21(m, vector<int>(m)), A22(m, vector<int>(m));
+    Matrix B11(m, vector<int>(m)), B12(m, vector<int>(m)),
+           B21(m, vector<int>(m)), B22(m, vector<int>(m));
 
-    for (int i = 0; i < newSize; i++)
-        for (int j = 0; j < newSize; j++) {
+    for (int i = 0; i < m; i++)
+        for (int j = 0; j < m; j++) {
             A11[i][j] = A[i][j];
-            A12[i][j] = A[i][j + newSize];
-            A21[i][j] = A[i + newSize][j];
-            A22[i][j] = A[i + newSize][j + newSize];
+            A12[i][j] = A[i][j + m];
+            A21[i][j] = A[i + m][j];
+            A22[i][j] = A[i + m][j + m];
             B11[i][j] = B[i][j];
-            B12[i][j] = B[i][j + newSize];
-            B21[i][j] = B[i + newSize][j];
-            B22[i][j] = B[i + newSize][j + newSize];
+            B12[i][j] = B[i][j + m];
+            B21[i][j] = B[i + m][j];
+            B22[i][j] = B[i + m][j + m];
         }
 
+    // Семь продуктов
     Matrix M1 = strassenSequential(add(A11, A22), add(B11, B22));
     Matrix M2 = strassenSequential(add(A21, A22), B11);
     Matrix M3 = strassenSequential(A11, subtract(B12, B22));
@@ -78,116 +86,142 @@ Matrix strassenSequential(const Matrix& A, const Matrix& B) {
     Matrix M6 = strassenSequential(subtract(A21, A11), add(B11, B12));
     Matrix M7 = strassenSequential(subtract(A12, A22), add(B21, B22));
 
+    // Сборка
     Matrix C(n, vector<int>(n));
-    for (int i = 0; i < newSize; i++)
-        for (int j = 0; j < newSize; j++) {
-            C[i][j] = M1[i][j] + M4[i][j] - M5[i][j] + M7[i][j];
-            C[i][j + newSize] = M3[i][j] + M5[i][j];
-            C[i + newSize][j] = M2[i][j] + M4[i][j];
-            C[i + newSize][j + newSize] = M1[i][j] - M2[i][j] + M3[i][j] + M6[i][j];
+    for (int i = 0; i < m; i++)
+        for (int j = 0; j < m; j++) {
+            C[i][j]                 = M1[i][j] + M4[i][j] - M5[i][j] + M7[i][j];
+            C[i][j + m]             = M3[i][j] + M5[i][j];
+            C[i + m][j]             = M2[i][j] + M4[i][j];
+            C[i + m][j + m]         = M1[i][j] - M2[i][j] + M3[i][j] + M6[i][j];
         }
     return C;
 }
 
-struct StrassenArgs {
+// Для передачи в поток
+struct SeqArgs {
     const Matrix* A;
     const Matrix* B;
     Matrix* result;
-    int n;
 };
-
-void* strassenThread(void* arg) {
-    StrassenArgs* args = static_cast<StrassenArgs*>(arg);
-    *args->result = strassenSequential(*args->A, *args->B);
+void* seqWorker(void* arg) {
+    auto* a = static_cast<SeqArgs*>(arg);
+    *a->result = strassenSequential(*a->A, *a->B);
     return nullptr;
 }
 
+// Параллельный только на top-level
 Matrix strassenParallel(const Matrix& A, const Matrix& B) {
     int n = A.size();
-    if (n <= STRASSEN_THRESHOLD) return standardMultiply(A, B);
+    if (n <= STRASSEN_THRESHOLD || maxThreads <= 1)
+        return strassenSequential(A, B);
 
-    int newSize = n / 2;
-    Matrix A11(newSize, vector<int>(newSize)), A12(newSize, vector<int>(newSize)),
-        A21(newSize, vector<int>(newSize)), A22(newSize, vector<int>(newSize));
-    Matrix B11(newSize, vector<int>(newSize)), B12(newSize, vector<int>(newSize)),
-        B21(newSize, vector<int>(newSize)), B22(newSize, vector<int>(newSize));
-
-    for (int i = 0; i < newSize; i++) {
-        for (int j = 0; j < newSize; j++) {
+    int m = n / 2;
+    // Блоки A и B
+    Matrix A11(m, vector<int>(m)), A12(m, vector<int>(m)),
+           A21(m, vector<int>(m)), A22(m, vector<int>(m));
+    Matrix B11(m, vector<int>(m)), B12(m, vector<int>(m)),
+           B21(m, vector<int>(m)), B22(m, vector<int>(m));
+    for (int i = 0; i < m; i++)
+        for (int j = 0; j < m; j++) {
             A11[i][j] = A[i][j];
-            A12[i][j] = A[i][j + newSize];
-            A21[i][j] = A[i + newSize][j];
-            A22[i][j] = A[i + newSize][j + newSize];
+            A12[i][j] = A[i][j + m];
+            A21[i][j] = A[i + m][j];
+            A22[i][j] = A[i + m][j + m];
             B11[i][j] = B[i][j];
-            B12[i][j] = B[i][j + newSize];
-            B21[i][j] = B[i + newSize][j];
-            B22[i][j] = B[i + newSize][j + newSize];
+            B12[i][j] = B[i][j + m];
+            B21[i][j] = B[i + m][j];
+            B22[i][j] = B[i + m][j + m];
         }
+
+    // Подготовка 7 задач
+    Matrix As[7], Bs[7], Ms[7];
+    As[0] = add(A11, A22);       Bs[0] = add(B11, B22);
+    As[1] = add(A21, A22);       Bs[1] = B11;
+    As[2] = A11;                 Bs[2] = subtract(B12, B22);
+    As[3] = A22;                 Bs[3] = subtract(B21, B11);
+    As[4] = add(A11, A12);       Bs[4] = B22;
+    As[5] = subtract(A21, A11);  Bs[5] = add(B11, B12);
+    As[6] = subtract(A12, A22);  Bs[6] = add(B21, B22);
+
+    // Сколько потоков насоздаём (не больше 7, и не больше maxThreads‑1)
+    int spawn = min(maxThreads - 1, 7);
+    pthread_t tids[7];
+    SeqArgs args[7];
+
+    // 1) Создаём spawn потоков
+    for (int i = 0; i < spawn; i++) {
+        args[i] = { &As[i], &Bs[i], &Ms[i] };
+        pthread_create(&tids[i], nullptr, seqWorker, &args[i]);
     }
-
-    Matrix M1, M2, M3, M4, M5, M6, M7;
-    pthread_t threads[7];
-    StrassenArgs args[7];
-
-    args[0] = {&A11, &A22, &M1, n};
-    args[1] = {&A21, &A22, &M2, n};
-    args[2] = {&A11, &B12, &M3, n};
-    args[3] = {&A22, &B21, &M4, n};
-    args[4] = {&A11, &B22, &M5, n};
-    args[5] = {&A21, &A11, &M6, n};
-    args[6] = {&A12, &B21, &M7, n};
-
-    for (int i = 0; i < 7; i++) {
-        pthread_create(&threads[i], nullptr, strassenThread, &args[i]);
+    // 2) Остальные задачи в текущем (главном) потоке
+    for (int i = spawn; i < 7; i++) {
+        Ms[i] = strassenSequential(As[i], Bs[i]);
     }
-
-    for (int i = 0; i < 7; i++) {
-        pthread_join(threads[i], nullptr);
+    // 3) Ждём потоков
+    for (int i = 0; i < spawn; i++) {
+        pthread_join(tids[i], nullptr);
     }
 
     // Сборка результата
     Matrix C(n, vector<int>(n));
-    for (int i = 0; i < newSize; i++) {
-        for (int j = 0; j < newSize; j++) {
-            C[i][j] = M1[i][j] + M4[i][j] - M5[i][j] + M7[i][j];
-            C[i][j + newSize] = M3[i][j] + M5[i][j];
-            C[i + newSize][j] = M2[i][j] + M4[i][j];
-            C[i + newSize][j + newSize] = M1[i][j] - M2[i][j] + M3[i][j] + M6[i][j];
+    for (int i = 0; i < m; i++)
+        for (int j = 0; j < m; j++) {
+            C[i][j]                 = Ms[0][i][j] + Ms[3][i][j]
+                                    - Ms[4][i][j] + Ms[6][i][j];
+            C[i][j + m]             = Ms[2][i][j] + Ms[4][i][j];
+            C[i + m][j]             = Ms[1][i][j] + Ms[3][i][j];
+            C[i + m][j + m]         = Ms[0][i][j] - Ms[1][i][j]
+                                    + Ms[2][i][j] + Ms[5][i][j];
         }
-    }
     return C;
 }
 
-int main() {
-    int n = 512;
+bool areMatricesEqual(const Matrix& A, const Matrix& B) {
+    int n = A.size();
+    for (int i = 0; i < n; i++)
+        for (int j = 0; j < n; j++)
+            if (A[i][j] != B[i][j])
+                return false;
+    return true;
+}
+
+int main(int argc, char* argv[]) {
+    if (argc > 1) {
+        maxThreads = stoi(argv[1]);
+        if (maxThreads < 1) maxThreads = 1;
+    }
+    cout << "Using up to " << maxThreads << " threads\n";
+
+    int n = 1024;
     Matrix A = generateRandomMatrix(n);
     Matrix B = generateRandomMatrix(n);
 
     Matrix C_std, C_seq, C_par;
-    double time_std, time_seq, time_par;
+    double t_std, t_seq, t_par;
 
-    // Стандартное умножение
-    auto start_std = chrono::high_resolution_clock::now();
+    auto t0 = chrono::high_resolution_clock::now();
     C_std = standardMultiply(A, B);
-    auto end_std = chrono::high_resolution_clock::now();
-    time_std = chrono::duration<double, milli>(end_std - start_std).count();
+    auto t1 = chrono::high_resolution_clock::now();
+    t_std = chrono::duration<double, milli>(t1 - t0).count();
 
-    // Последовательное умножение (Штрассен)
-    auto start_seq = chrono::high_resolution_clock::now();
+    auto t2 = chrono::high_resolution_clock::now();
     C_seq = strassenSequential(A, B);
-    auto end_seq = chrono::high_resolution_clock::now();
-    time_seq = chrono::duration<double, milli>(end_seq - start_seq).count();
+    auto t3 = chrono::high_resolution_clock::now();
+    t_seq = chrono::duration<double, milli>(t3 - t2).count();
 
-    // Параллельное умножение (Штрассен)
-    auto start_par = chrono::high_resolution_clock::now();
+    auto t4 = chrono::high_resolution_clock::now();
     C_par = strassenParallel(A, B);
-    auto end_par = chrono::high_resolution_clock::now();
-    time_par = chrono::duration<double, milli>(end_par - start_par).count();
+    auto t5 = chrono::high_resolution_clock::now();
+    t_par = chrono::duration<double, milli>(t5 - t4).count();
 
-    // Вывод времени выполнения
-    cout << "Standard multiply: " << time_std << " ms\n";
-    cout << "Sequential Strassen: " << time_seq << " ms\n";
-    cout << "Parallel Strassen: " << time_par << " ms\n";
+    cout << "Standard multiply:   " << t_std << " ms\n";
+    cout << "Sequential Strassen: " << t_seq << " ms\n";
+    cout << "Parallel Strassen:   " << t_par << " ms\n\n";
+
+    cout << "Std vs Seq: " << (areMatricesEqual(C_std, C_seq) ? "Equal\n" : "Not equal\n");
+    cout << "Std vs Par: " << (areMatricesEqual(C_std, C_par) ? "Equal\n" : "Not equal\n");
+    cout << "Seq vs Par: " << (areMatricesEqual(C_seq, C_par) ? "Equal\n" : "Not equal\n");
 
     return 0;
 }
