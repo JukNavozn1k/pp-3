@@ -9,6 +9,8 @@ using Matrix = vector<vector<int>>;
 
 const int STRASSEN_THRESHOLD = 64;
 
+int MAX_THREADS = 1;
+
 struct ThreadData {
     Matrix A;
     Matrix B;
@@ -101,7 +103,8 @@ void* computeM(void* arg) {
 
 Matrix strassenPOSIX(const Matrix& A, const Matrix& B) {
     int n = A.size();
-    if (n <= STRASSEN_THRESHOLD) return standardMultiply(A, B);
+    if (n <= STRASSEN_THRESHOLD || MAX_THREADS < 7)
+        return strassenSequential(A, B);
 
     int newSize = n / 2;
     Matrix A11(newSize, vector<int>(newSize)), A12(newSize, vector<int>(newSize)),
@@ -157,18 +160,20 @@ Matrix strassenPOSIX(const Matrix& A, const Matrix& B) {
 bool validateMatrices(const Matrix& A, const Matrix& B) {
     if (A.size() != B.size()) return false;
     int n = A.size();
-    for (int i = 0; i < n; ++i) {
-        for (int j = 0; j < n; ++j) {
-            if (A[i][j] != B[i][j]) {
-                return false;
-            }
-        }
-    }
+    for (int i = 0; i < n; ++i)
+        for (int j = 0; j < n; ++j)
+            if (A[i][j] != B[i][j]) return false;
     return true;
 }
 
-int main() {
-    int n = 2048;
+int main(int argc, char* argv[]) {
+    int n = 1024;
+    if (argc >= 2) n = atoi(argv[1]);
+    if (argc >= 3) MAX_THREADS = atoi(argv[2]);
+
+    cout << "Matrix size: " << n << "x" << n << endl;
+    cout << "Max threads: " << MAX_THREADS << endl;
+
     Matrix A = generateRandomMatrix(n);
     Matrix B = generateRandomMatrix(n);
 
