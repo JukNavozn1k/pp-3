@@ -1,0 +1,14 @@
+Size,Standard (ms),Sequential Strassen (ms),Parallel Strassen (ms),Validation Seq,Validation Par
+2,0.000381,0.00014,0.000211,Passed,Passed
+4,0.000251,0.0002,0.000131,Passed,Passed
+8,0.000451,0.000391,0.000371,Passed,Passed
+16,0.003367,0.005401,0.003387,Passed,Passed
+32,0.015321,0.016234,0.016895,Passed,Passed
+64,0.122341,0.119937,0.12157,Passed,Passed
+128,1.05097,0.990468,1.44849,Passed,Passed
+256,8.08181,7.07535,13.0405,Passed,Passed
+512,64.8718,51.5935,51.3251,Passed,Passed
+1024,530.256,359.048,233.126,Passed,Passed
+2048,4193.52,2696.98,1000.21,Passed,Passed
+4096,34535.7,21364,6212.27,Passed,Passed
+8192,285535,160373,45922.8,Passed,Passed
