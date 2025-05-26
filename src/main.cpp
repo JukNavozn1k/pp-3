@@ -4,7 +4,7 @@
 #include <chrono>
 #include <pthread.h>
 #include <semaphore.h>
-
+#include <fstream>
 using namespace std;
 using Matrix = vector<vector<int>>;
 
@@ -177,6 +177,60 @@ bool validateMatrices(const Matrix& A, const Matrix& B) {
         for (int j = 0; j < n; ++j)
             if (A[i][j] != B[i][j]) return false;
     return true;
+}
+
+void runBenchmark(int n, ofstream& outFile) {
+    sem_init(&thread_sem, 0, MAX_THREADS);
+
+    Matrix A = generateRandomMatrix(n);
+    Matrix B = generateRandomMatrix(n);
+
+    double time_std, time_seq, time_par;
+
+    // Standard multiply
+    auto start_std = chrono::high_resolution_clock::now();
+    Matrix C_std = standardMultiply(A, B);
+    auto end_std = chrono::high_resolution_clock::now();
+    time_std = chrono::duration<double, milli>(end_std - start_std).count();
+
+    // Sequential Strassen
+    auto start_seq = chrono::high_resolution_clock::now();
+    Matrix C_seq = strassenSequential(A, B);
+    auto end_seq = chrono::high_resolution_clock::now();
+    time_seq = chrono::duration<double, milli>(end_seq - start_seq).count();
+
+    // Parallel Strassen
+    auto start_par = chrono::high_resolution_clock::now();
+    Matrix C_par = strassenPOSIX(A, B);
+    auto end_par = chrono::high_resolution_clock::now();
+    time_par = chrono::duration<double, milli>(end_par - start_par).count();
+
+    // Validation
+    bool valid_seq = validateMatrices(C_std, C_seq);
+    bool valid_par = validateMatrices(C_std, C_par);
+
+    outFile << n << "," << time_std << "," << time_seq << "," 
+            << time_par << "," << (valid_seq ? "Passed" : "Failed") << ","
+            << (valid_par ? "Passed" : "Failed") << "\n";
+
+    sem_destroy(&thread_sem);
+}
+void benchmarkPowersOfTwo() {
+    ofstream outFile("benchmark_results.csv");
+    outFile << "Size,Standard (ms),Sequential Strassen (ms),Parallel Strassen (ms),Validation Seq,Validation Par\n";
+
+    vector<int> sizes;
+    for (int i = 1; i <= 13; i++) {
+        sizes.push_back(1 << i); // 2^1 до 2^13 (2..8192)
+    }
+
+    for (int n : sizes) {
+        cout << "Benchmarking " << n << "x" << n << "..." << endl;
+        runBenchmark(n, outFile);
+    }
+
+    outFile.close();
+    cout << "Benchmark results saved to benchmark_results.csv" << endl;
 }
 
 int main(int argc, char* argv[]) {
